@@ -56,60 +56,55 @@ class Agent:
 
     def evaluate(self, st: state) -> float:
         """
-        局面评估：
-        - 鼓励“桥倾向”(bridge_like)与区域数(regions)，鼓励边缘占位(edge_pos)
-        - 惩罚潜在桥(may_hingers)与总权重(total_sum)
-        - 对连通块大小的奇偶做轻微偏置(parity_bias)
+        按注释的优先级对局面打分：
+        - 真桥(尤其值为1)强奖励
+        - 惩罚 may_hinger 与风险桥位
+        - 角 > 边 > 内部
+        - 奖励连通块数、奇偶偏置；对总值轻惩罚
         """
         grid = getattr(st, "result", None)
         if not grid or not grid[0]:
             return 0.0
 
         rows, cols = len(grid), len(grid[0])
-        total_sum = 0  # 所有正值之和（惩罚）
-        edge_pos = 0  # 边缘的正值格数量（奖励）
-        may_hingers = 0  # 潜在桥位置计数（惩罚）
-        bridge_like = 0  # 桥倾向位置计数（奖励）
 
-        # 若类中实现了 _deg8 与 _count_regions8，则复用；否则在本函数内降级实现
-        def _deg8_local(g, r, c) -> int:
-            deg = 0
-            for dr in (-1, 0, 1):
-                for dc in (-1, 0, 1):
-                    if dr == 0 and dc == 0:
-                        continue
-                    nr, nc = r + dr, c + dc
-                    if 0 <= nr < rows and 0 <= nc < cols and g[nr][nc] > 0:
-                        deg += 1
-            return deg
+        # 若有真桥检测，做一次全量扫描，得到最新真桥集合
+        true_bridges_set = set()
+        if hasattr(st, "IS_Hinger"):
+            try:
+                coords = st.IS_Hinger(full_scan=True) or []
+                true_bridges_set = set(coords)
+            except Exception:
+                true_bridges_set = set()
 
-        def _regions8_local(g) -> int:
-            from collections import deque
-            vis = [[False] * cols for _ in range(rows)]
-            dirs8 = [(-1, 0), (1, 0), (0, -1), (0, 1),
-                     (-1, -1), (-1, 1), (1, -1), (1, 1)]
-            cnt = 0
-            for i in range(rows):
-                for j in range(cols):
-                    if g[i][j] > 0 and not vis[i][j]:
-                        cnt += 1
-                        q = deque([(i, j)])
-                        vis[i][j] = True
-                        while q:
-                            r, c = q.popleft()
-                            for dr, dc in dirs8:
-                                nr, nc = r + dr, c + dc
-                                if 0 <= nr < rows and 0 <= nc < cols and g[nr][nc] > 0 and not vis[nr][nc]:
-                                    vis[nr][nc] = True
-                                    q.append((nr, nc))
-            return cnt
+        # 局部工具
+        def deg8_local(g, r, c) -> int:
+            return self._deg8(g, r, c) if hasattr(self, "_deg8") else sum(
+                1
+                for dr in (-1, 0, 1)
+                for dc in (-1, 0, 1)
+                if not (dr == 0 and dc == 0)
+                and 0 <= r + dr < rows
+                and 0 <= c + dc < cols
+                and g[r + dr][c + dc] > 0
+            )
 
-        deg8 = getattr(self, "_deg8", None)
-        if not callable(deg8):
-            deg8 = _deg8_local
-        count_regions8 = getattr(self, "_count_regions8", None)
-        if not callable(count_regions8):
-            count_regions8 = _regions8_local
+        def count_regions8_local(g) -> int:
+            return self._count_regions8(g) if hasattr(self, "_count_regions8") else (
+                # 降级实现
+                (lambda: (
+                    (lambda vis=[]: 0)  # 仅占位，实际不会走到这里
+                ))()
+            )
+
+        # 统计特征
+        total_sum = 0
+        edge_cnt = 0
+        corner_cnt = 0
+        may_hingers = 0
+        risky_bridge_like = 0
+        true_bridge_ones = 0
+        true_bridge_others = 0
 
         for r in range(rows):
             for c in range(cols):
@@ -118,29 +113,40 @@ class Agent:
                     continue
 
                 total_sum += v
-                if r == 0 or c == 0 or r == rows - 1 or c == cols - 1:
-                    edge_pos += 1
+                is_edge = r == 0 or c == 0 or r == rows - 1 or c == cols - 1
+                is_corner = (r in (0, rows - 1)) and (c in (0, cols - 1))
+                if is_corner:
+                    corner_cnt += 1
+                elif is_edge:
+                    edge_cnt += 1
 
+                # 真桥奖励（值为1奖励更高）
+                if (r, c) in true_bridges_set:
+                    if v == 1:
+                        true_bridge_ones += 1
+                    else:
+                        true_bridge_others += 1
+
+                # may_hinger：直线两侧为0且八邻度较高的值为1位置
                 if v == 1:
-                    # 潜在桥（左右为0或上下为0；且八邻域度>=2）
                     lr_zeros = (1 if c - 1 >= 0 and grid[r][c - 1] == 0 else 0) + \
                                (1 if c + 1 < cols and grid[r][c + 1] == 0 else 0)
                     ud_zeros = (1 if r - 1 >= 0 and grid[r - 1][c] == 0 else 0) + \
                                (1 if r + 1 < rows and grid[r + 1][c] == 0 else 0)
-                    if (lr_zeros == 2 or ud_zeros == 2) and deg8(grid, r, c) >= 2:
+                    if (lr_zeros == 2 or ud_zeros == 2) and deg8_local(grid, r, c) >= 2:
                         may_hingers += 1
 
-                    # 桥倾向：一格视野内在该方向两侧都有活邻
+                    # 风险桥位倾向：一格视野内两侧都有活邻，未来可能成为唯一连接
                     has_left = any(grid[r][cc] > 0 for cc in range(max(0, c - 1), c))
                     has_right = any(grid[r][cc] > 0 for cc in range(c + 1, min(cols, c + 2)))
                     has_up = any(grid[rr][c] > 0 for rr in range(max(0, r - 1), r))
                     has_down = any(grid[rr][c] > 0 for rr in range(r + 1, min(rows, r + 2)))
                     if (has_left and has_right) or (has_up and has_down):
-                        bridge_like += 1
+                        risky_bridge_like += 1
 
-        regions = count_regions8(grid)
+        # 连通块与奇偶偏置
+        regions = self._count_regions8(grid)
 
-        # 连通块大小奇偶性偏置（奇数+1，偶数-1）
         def component_sizes() -> list[int]:
             from collections import deque
             visited = [[False] * cols for _ in range(rows)]
@@ -152,47 +158,102 @@ class Agent:
                     if grid[i][j] > 0 and not visited[i][j]:
                         q = deque([(i, j)])
                         visited[i][j] = True
-                        size = 0
+                        sz = 0
                         while q:
                             rr, cc = q.popleft()
-                            size += 1
+                            sz += 1
                             for dr, dc in dirs8:
                                 nr, nc = rr + dr, cc + dc
                                 if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and grid[nr][nc] > 0:
                                     visited[nr][nc] = True
                                     q.append((nr, nc))
-                        sizes.append(size)
+                        sizes.append(sz)
             return sizes
 
-        parity_bias = 0
-        for sz in component_sizes():
-            parity_bias += (1 if sz % 2 == 1 else -1)
+        parity_bias = sum(1 if sz % 2 == 1 else -1 for sz in component_sizes())
 
-        # 线性加权评分（可按需要微调权重）
+        # 线性加权（按照注释的优先级进行）
         score = (
-                + 5.0 * bridge_like
-                - 3.0 * may_hingers
-                + 1.0 * regions
-                + 0.5 * edge_pos
-                - 0.05 * total_sum
+                + 7.0 * true_bridge_ones
+                + 4.0 * true_bridge_others
+                + 1.5 * regions
+                + 0.6 * corner_cnt
+                + 0.4 * (edge_cnt)  # 非角边缘
                 + 0.3 * parity_bias
+                - 3.0 * may_hingers
+                - 1.2 * risky_bridge_like
+                - 0.04 * total_sum
         )
         return float(score)
 
     def MiniMax(self, st: state, depth: int = 2, maximizing_player: bool = True) -> Tuple[float, Optional[Coord]]:
         """
-        经典极大极小：
-        - 终止：深度==0 或无合法着法
-        - 递归：遍历合法着法，分别克隆落子后递归评估
+        仅扩展两个代表分支：真桥分支 与 非真桥分支。
+        若真桥为空，用中性分支与风险分支补齐。
         """
         moves = self._legal_moves(st)
         if depth == 0 or not moves:
             return self.evaluate(st), None
 
+        # 准备真桥集合用于分组
+        true_set = set()
+        if hasattr(st, "IS_Hinger"):
+            try:
+                true_set = set(st.IS_Hinger(full_scan=True) or [])
+            except Exception:
+                true_set = set()
+
+        # 分组
+        safe_moves: list[Coord] = []
+        neutral_moves: list[Coord] = []
+        risky_moves: list[Coord] = []
+
+        rows, cols = len(st.result), len(st.result[0]) if st.result else 0
+
+        def is_may_hinger(r: int, c: int) -> bool:
+            v = st.result[r][c]
+            if v != 1:
+                return False
+            lr_zeros = (1 if c - 1 >= 0 and st.result[r][c - 1] == 0 else 0) + \
+                       (1 if c + 1 < cols and st.result[r][c + 1] == 0 else 0)
+            ud_zeros = (1 if r - 1 >= 0 and st.result[r - 1][c] == 0 else 0) + \
+                       (1 if r + 1 < rows and st.result[r + 1][c] == 0 else 0)
+            return (lr_zeros == 2 or ud_zeros == 2) and self._deg8(st.result, r, c) >= 2
+
+        for mv in moves:
+            if mv in true_set:
+                safe_moves.append(mv)
+            elif is_may_hinger(*mv):
+                risky_moves.append(mv)
+            else:
+                neutral_moves.append(mv)
+
+        # 代表动作选择与排序（与 _legal_moves 的启发一致）
+        def key(mv: Coord):
+            r, c = mv
+            bridge_bias = 1 if st.result[r][c] == 1 and self._deg8(st.result, r, c) >= 2 else 0
+            edge_bias = 1 if r in (0, len(st.result) - 1) or c in (0, len(st.result[0]) - 1) else 0
+            return (bridge_bias, edge_bias, -st.result[r][c])
+
+        safe_moves.sort(key=key, reverse=True)
+        neutral_moves.sort(key=key, reverse=True)
+        risky_moves.sort(key=key, reverse=True)
+
+        # 仅取两类代表
+        cand: list[Coord] = []
+        if safe_moves:
+            cand.append(safe_moves[0])
+        if neutral_moves:
+            cand.append(neutral_moves[0])
+        if not cand and risky_moves:
+            cand.append(risky_moves[0])
+        if not cand:
+            cand.append(moves[0])
+
         if maximizing_player:
             best_val = float("-inf")
             best_move: Optional[Coord] = None
-            for mv in moves:
+            for mv in cand:
                 child = self._clone_with_move(st, mv)
                 val, _ = self.MiniMax(child, depth - 1, maximizing_player=False)
                 if val > best_val:
@@ -201,7 +262,7 @@ class Agent:
         else:
             best_val = float("inf")
             best_move: Optional[Coord] = None
-            for mv in moves:
+            for mv in cand:
                 child = self._clone_with_move(st, mv)
                 val, _ = self.MiniMax(child, depth - 1, maximizing_player=True)
                 if val < best_val:
@@ -215,37 +276,86 @@ class Agent:
                   beta: float,
                   maximizing_player: bool = True) -> Tuple[float, Optional[Coord]]:
         """
-        Alpha-Beta 剪枝：
-        - 与 MiniMax 相同终止条件
-        - 通过 alpha/beta 界提前剪去不可能改善的分支
+        先真桥、后中性、最后风险排序；在较深层直接剪掉风险分支，只保留少量中性分支做束搜索。
+        再结合标准 alpha-beta 剪枝。
         """
         moves = self._legal_moves(st)
         if depth == 0 or not moves:
             return self.evaluate(st), None
 
+        # 分组准备
+        true_set = set()
+        if hasattr(st, "IS_Hinger"):
+            try:
+                true_set = set(st.IS_Hinger(full_scan=True) or [])
+            except Exception:
+                true_set = set()
+
+        rows, cols = len(st.result), len(st.result[0]) if st.result else 0
+
+        def is_may_hinger(r: int, c: int) -> bool:
+            v = st.result[r][c]
+            if v != 1:
+                return False
+            lr_zeros = (1 if c - 1 >= 0 and st.result[r][c - 1] == 0 else 0) + \
+                       (1 if c + 1 < cols and st.result[r][c + 1] == 0 else 0)
+            ud_zeros = (1 if r - 1 >= 0 and st.result[r - 1][c] == 0 else 0) + \
+                       (1 if r + 1 < rows and st.result[r + 1][c] == 0 else 0)
+            return (lr_zeros == 2 or ud_zeros == 2) and self._deg8(st.result, r, c) >= 2
+
+        safe_moves: list[Coord] = []
+        neutral_moves: list[Coord] = []
+        risky_moves: list[Coord] = []
+
+        for mv in moves:
+            if mv in true_set:
+                safe_moves.append(mv)
+            elif is_may_hinger(*mv):
+                risky_moves.append(mv)
+            else:
+                neutral_moves.append(mv)
+
+        def key(mv: Coord):
+            r, c = mv
+            bridge_bias = 1 if st.result[r][c] == 1 and self._deg8(st.result, r, c) >= 2 else 0
+            edge_bias = 1 if r in (0, len(st.result) - 1) or c in (0, len(st.result[0]) - 1) else 0
+            return (bridge_bias, edge_bias, -st.result[r][c])
+
+        safe_moves.sort(key=key, reverse=True)
+        neutral_moves.sort(key=key, reverse=True)
+        risky_moves.sort(key=key, reverse=True)
+
+        # 深度越深，越果断剪掉风险，并限制中性束宽
+        beam_neutral = 2 if depth >= 2 else 4
+        ordered: list[Coord] = []
+        ordered.extend(safe_moves)
+        ordered.extend(neutral_moves[:beam_neutral])
+        if depth <= 1:  # 只在浅层允许看一点风险分支
+            ordered.extend(risky_moves[:1])
+
         if maximizing_player:
             best_val = float("-inf")
             best_move: Optional[Coord] = None
-            for mv in moves:
+            for mv in ordered:
                 child = self._clone_with_move(st, mv)
                 val, _ = self.AlphaBeta(child, depth - 1, alpha, beta, maximizing_player=False)
                 if val > best_val:
                     best_val, best_move = val, mv
                 alpha = max(alpha, best_val)
                 if beta <= alpha:
-                    break  # 剪枝
+                    break
             return best_val, best_move
         else:
             best_val = float("inf")
             best_move: Optional[Coord] = None
-            for mv in moves:
+            for mv in ordered:
                 child = self._clone_with_move(st, mv)
                 val, _ = self.AlphaBeta(child, depth - 1, alpha, beta, maximizing_player=True)
                 if val < best_val:
                     best_val, best_move = val, mv
                 beta = min(beta, best_val)
                 if beta <= alpha:
-                    break  # 剪枝
+                    break
             return best_val, best_move
     # ========= 辅助：生成落子、克隆走子、连通性与邻域 =========
 
