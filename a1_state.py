@@ -46,6 +46,12 @@ class State:
         :return: 桥梁数量
         """
         return self.true_hinger_global_coords
+    def getmylist(self):
+        """
+        获取当前链表对象
+        :return: 链表对象
+        """
+        return self.mylist
     def record_mouse(self, x: int, y: int, row: int | None = None, col: int | None = None) -> None:
         """
         记录一次鼠标事件

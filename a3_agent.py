@@ -262,7 +262,7 @@ class Agent:
         """
         if full_scan:
             # 全量扫描逻辑保持不变
-            current_node = self.state.mylist.head
+            current_node = state.getmylist().head
             while current_node is not None:
                 self._process_node_may_hinger(current_node)
                 current_node = current_node.next
@@ -373,7 +373,7 @@ class Agent:
         print("开始决策树处理流程")
 
         # 获取点击位置计数器值
-        current_value = self.state.grid[grid_row][grid_col]
+        current_value = state.reslut[grid_row][grid_col]
         print(f"坐标({grid_row}, {grid_col})的计数器值: {current_value}")
 
         # 决策点1: 计数器为0或>2?
@@ -383,13 +383,13 @@ class Agent:
 
         # 决策点2: 计数器为1或2，调用change_data修改数据
         print("决策点2: 计数器为1或2，调用change_data修改数据")
-        success = self.state.Change_Data(grid_row, grid_col)
+        success = state.Change_Data(grid_row, grid_col)
         if not success:
             print("数据修改失败，结束处理")
             return
 
         # 获取受影响节点
-        affected_node = self.state.Search_Node(grid_row, grid_col)
+        affected_node = state.Search_Node(grid_row, grid_col)
         if affected_node is None:
             print("警告: 未找到受影响节点，结束处理")
             return
