@@ -8,8 +8,8 @@ Includes a State class for Task 1
 @date: 11/10/2025
 
 """
-#在这个搜索文件中应该包含BFS,DFS,A*等算法
-# 在其中这个文件中的所有数据应该先预处理 寻找出变化的大体范围在采用对应的算法
+# This search file should include algorithms such as BFS, DFS, A*, etc.
+# For all the data in this file, it should be preprocessed first to identify the general range of changes and then apply the corresponding algorithm.
 import heapq
 from collections import deque
 from a1_state import State

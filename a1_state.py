@@ -16,140 +16,143 @@ from typing import Any
 
 from MyList import MyList
 
-# 保持对 MyList 的依赖
+# Keep dependency on MyList
 
 class State:
     # Core state class that holds the grid data and graph logic
-    # 保存网格数据与图相关逻辑的核心类
     def __init__(self, data):
         self.m = len(data)
         self.n = len(data[0]) if self.m > 0 else 0
-        self.result = [row[:] for row in data] # 全局网格数据
+        self.result = [row[:] for row in data]  # global grid data
 
         from MyList import MyList
-        self.mylist = MyList() # 储存活跃区域的链表
+        self.mylist = MyList()  # stores linked list of active regions
         self.node = self.mylist.append(
             0, 0, 0, 0,
             [[0] * (self.n + 2) for _ in range(self.m + 2)],
             bridge_num=0,
             graph_num=1
         )
-        self.true_hinger_global_coords = []  # 全局真桥全局坐标列表
-        self.hinger_count = 0  # 桥梁数量
-        self.first_check = True  # 是否是第一次检查
-        self.affected_node = set()  # 受影响的节点集合
-        # 新增：用于记录鼠标事件（像素与网格坐标）
+        self.true_hinger_global_coords = []  # global true hinger coordinates list
+        self.hinger_count = 0  # number of hingers
+        self.first_check = True  # whether it's the first check
+        self.affected_node = set()  # set of affected nodes
+        # New: record mouse events (pixel and grid coordinates)
         self.mouse_events = []  # [{'x': int, 'y': int, 'row': int|None, 'col': int|None}, ...]
+
     def Get_hinger_global_coords(self):
         """
-        获取当前桥梁数量
-        :return: 桥梁数量
+        Get the current list of true hinger coordinates
+        :return: list of true hinger coordinates
         """
         return self.true_hinger_global_coords
+
     def get_result(self):
         """
-        获取当前全局网格数据
-        :return: 全局网格数据
+        Get the current global grid data
+        :return: global grid data
         """
         return self.result
+
     def getmylist(self):
         """
-        获取当前链表对象
-        :return: 链表对象
+        Get the current linked-list object
+        :return: linked-list object
         """
         return self.mylist
+
     def record_mouse(self, x: int, y: int, row: int | None = None, col: int | None = None) -> None:
         """
-        记录一次鼠标事件
-        :param x: 鼠标点击的像素坐标 x
-        :param y: 鼠标点击的像素坐标 y
-        :param row: 可选的网格坐标行号
-        :param col: 可选的网格坐标列号
+        Record a mouse event
+        :param x: mouse click pixel coordinate x
+        :param y: mouse click pixel coordinate y
+        :param row: optional grid row index
+        :param col: optional grid column index
         """
-        # 记录鼠标事件信息
+        # Record mouse event details
         self.mouse_events.append({'x': x, 'y': y, 'row': row, 'col': col})
 
-        # 如果提供了行列信息，找到对应的节点并标记为受影响
+        # If row/col provided, find the corresponding node and mark it affected
         if row is not None and col is not None:
             node = self.Search_Node(row, col)
             if node is not None:
                 self.affected_node.add(node)
-                # 同时修改数据
+                # Also update data
                 self.Change_Data(row, col)
-        return None  # 如果没有提供行列信息或未找到节点，返回None
+        return None  # return None if row/col not provided or node not found
 
     def Moves(self, row: int, col: int) -> bool:
         """
-        修改指定鼠标点击坐标位置的数字，减一操作
-        不对零进行操作，仅判断，由a4的win函数判断
-        :param row: 全局网格地行坐标
-        :param col: 全局网格的列坐标
-        如果已经是零，则保持不变
-        :return: 修改成功返回True，否则返回False
-        只修改鼠标点击位置所在的区域节点内的数据（现交由Change_Date修改）
+        Decrement the counter at the specified mouse click coordinates.
+        Do not operate on zeros; the GUI (a4) will handle display.
+        :param row: global grid row index
+        :param col: global grid column index
+        If already zero, keep unchanged
+        :return: True if modification succeeded, otherwise False
+        Only modifies data inside the node that contains the clicked cell (Change_Data handles this)
         """
 
-        # 检查当前格内计数器数字是否为零
+        # Check if the counter at the cell is zero
         if self.result[row][col] == 0:
-            print(f"坐标({row}, {col})的值已经是零，不进行操作")
+            print(f"Value at ({row}, {col}) is already zero, no operation performed")
             return False
 
-        # 通过鼠标坐标找到包含该坐标的节点
+        # Find the node that contains the mouse coordinates
         node = self.Search_Node(row, col)
         if node is None:
-            # 如果找不到对应节点，可能是点击了非活跃区域
-            print(f"警告: 坐标({row}, {col})不在任何活跃区域内")
+            # If no node found, the click may have been outside active regions
+            print(f"Warning: Coordinate ({row}, {col}) is not inside any active region")
             return False
 
     def Change_Data(self, row: int, col: int, node) -> bool:
         """
-        修改受影响节点的指定坐标位置的数字，减一操作
-        :param row: 行坐标（全局）
-        :param col: 列坐标（全局）
-        :param node: 包含该坐标的节点
-        :return: 修改成功返回True，否则返回False
-        只修改鼠标点击位置所在的区域节点内的数据
+        Decrement the value at the specified global coordinate inside the affected node.
+        :param row: row coordinate (global)
+        :param col: column coordinate (global)
+        :param node: node that contains the coordinate
+        :return: True if modification succeeded, otherwise False
+        Only modifies the data inside the node that contains the clicked cell
         """
-        # 获取节点的边界信息
-        min_x, max_x = node.get_min_x(), node.get_max_x()  # 列的范围
-        min_y, max_y = node.get_min_y(), node.get_max_y()  # 行的范围
+        # Get node boundary information
+        min_x, max_x = node.get_min_x(), node.get_max_x()  # column range
+        min_y, max_y = node.get_min_y(), node.get_max_y()  # row range
 
-        # 获取节点的网格数据
+        # Get the node's grid data
         node_grid = node.get_grid().data
 
-        # 计算节点网格的尺寸（包含周围一圈空白）
+        # Compute node grid size (includes surrounding blank border)
         node_rows = len(node_grid)
         node_cols = len(node_grid[0]) if node_rows > 0 else 0
 
-        # 将全局坐标转换为节点局部坐标
-        # 节点网格的(0,0)对应全局的(min_y-1, min_x-1)
+        # Convert global coordinates to local node coordinates
+        # Node grid (0,0) corresponds to global (min_y-1, min_x-1)
         local_row = row - (min_y - 1)
         local_col = col - (min_x - 1)
 
-        # 确保局部坐标在节点网格范围内
+        # Ensure local coordinates are within node grid bounds
         if (0 <= local_row < node_rows and
                 0 <= local_col < node_cols):
 
-            # 获取当前值
+            # Get current value
             current_value = node_grid[local_row][local_col]
 
-            # 如果当前值大于零，则减一
+            # If current value > 0, decrement it
             if current_value > 0:
-                # 更新节点网格数据
+                # Update node grid data
                 node_grid[local_row][local_col] = current_value - 1
 
-                # 同时更新全局网格数据
+                # Also update global grid data
                 self.result[row][col] = current_value - 1
 
-                print(f"坐标({row}, {col})的值从{current_value}减少到{current_value - 1}")
+                print(f"Value at ({row}, {col}) decreased from {current_value} to {current_value - 1}")
                 return True
             else:
-                print(f"坐标({row}, {col})的值已经是零，保持不变")
+                print(f"Value at ({row}, {col}) is already zero, unchanged")
                 return False
         else:
-            print(f"错误: 局部坐标({local_row}, {local_col})超出节点网格范围")
-            print(f"节点边界: min_y={min_y}, max_y={max_y}, min_x={min_x}, max_x={max_x}")
-            print(f"节点网格尺寸: {node_rows} x {node_cols}")
+            print(f"Error: local coordinates ({local_row}, {local_col}) out of node grid bounds")
+            print(f"Node boundaries: min_y={min_y}, max_y={max_y}, min_x={min_x}, max_x={max_x}")
+            print(f"Node grid size: {node_rows} x {node_cols}")
             return False
 
     def Get_Graph(self):
@@ -169,16 +172,16 @@ class State:
                 if graph[i][j] == 0 or visited[i][j]:
                     continue
 
-                # 队列与起点
+                # queue and start point
                 arr_ones = [(i, j)]
                 head = 0
 
-                # 边界与采样
+                # boundaries and sampling
                 minrow = maxrow = i
                 mincol = maxcol = j
                 comp_cells = []  # (r, c, v)
 
-                # 起点入采样，写入临时 grid（不清零 graph）
+                # add start point to sample, write into temporary grid (do not zero out graph)
                 v0 = graph[i][j]
                 grid[i][j] = v0
                 visited[i][j] = True
@@ -189,13 +192,13 @@ class State:
                     r, c = arr_ones[head]
                     head += 1
 
-                    # 更新边界
+                    # update boundaries
                     if r < minrow: minrow = r
                     if r > maxrow: maxrow = r
                     if c < mincol: mincol = c
                     if c > maxcol: maxcol = c
 
-                    # 扩展八邻域
+                    # expand 8-neighborhood
                     for dr, dc in dirs8:
                         nr, nc = r + dr, c + dc
                         if 0 <= nr < self.m and 0 <= nc < self.n:
@@ -206,13 +209,13 @@ class State:
                                 visited[nr][nc] = True
                                 comp_cells.append((nr, nc, val))
 
-                                # 同步更新边界
+                                # sync update boundaries
                                 if nr < minrow: minrow = nr
                                 if nr > maxrow: maxrow = nr
                                 if nc < mincol: mincol = nc
                                 if nc > maxcol: maxcol = nc
 
-                # 子网络裁剪：最小行/列对齐到 (1,1)，尺寸为(最大行+1, 最大列+1)
+                # clip subnetwork: align minimal row/col to (1,1), size = (maxrow-minrow+1, maxcol-mincol+1)
                 rows_rel_max = (maxrow - minrow) + 1
                 cols_rel_max = (maxcol - mincol) + 1
                 subgrid = [[0] * (cols_rel_max + 1) for _ in range(rows_rel_max + 1)]
@@ -221,7 +224,7 @@ class State:
                     cc = (c - mincol) + 1
                     subgrid[rr][cc] = v
 
-                # 写入链表：头节点直写，其后尾插
+                # write into linked list: write head node directly, then append others
                 if not used_head and self.mylist.head is not None and self.mylist.head == self.mylist.tail:
                     head_node = self.mylist.head
                     head_node.set_min_x(mincol)
@@ -232,7 +235,7 @@ class State:
                     head_node.set_graph_num(1)
                     used_head = True
                 else:
-                    # 检查是否存在相同图形（比较边界与二维数组内容）
+                    # check for duplicate shapes (compare boundaries and 2D array content)
                     is_dup = False
                     for node in self.mylist:
                         if (node.get_min_x() == mincol and node.get_max_x() == maxcol and
@@ -241,7 +244,7 @@ class State:
                             is_dup = True
                             break
 
-                    # 不重复则尾插，重复则跳过
+                    # if not duplicate append, otherwise skip
                     if not is_dup:
                         last_graph_num = self.mylist.tail.get_graph_num() if self.mylist.tail else 0
                         self.mylist.append(
@@ -254,22 +257,22 @@ class State:
                         subgrid, bridge_num=0, graph_num=last_graph_num + 1
                     )
 
-                # 清零本地缓冲 grid（不影响 self.result）
+                # clear local buffer grid (do not affect self.result)
                 for rr in range(self.m):
                     for cc in range(self.n):
                         grid[rr][cc] = 0
 
     def Search_Node(self, row, col):
         """
-        根据坐标找到对应的链表节点
-        :param row: 全局网格的行坐标
-        :param col: 全局网格的列坐标
-        :return: 对应的链表节点或 None
-        每个节点代表一个活跃区域，有特定的坐标范围
+        Find the linked-list node that contains the given coordinate
+        :param row: global grid row index
+        :param col: global grid column index
+        :return: corresponding linked-list node or None
+        Each node represents an active region with specific coordinate bounds
         """
 
         """
-        # 全新优化（by HaoranXiong）首先检查最近访问的节点（缓存优化）
+        # New optimization (by HaoranXiong): first check the last accessed node (cache optimization)
         if hasattr(self, 'last_accessed_node') and self.last_accessed_node:
             min_x, max_x = self.last_accessed_node.get_min_x(), self.last_accessed_node.get_max_x()
             min_y, max_y = self.last_accessed_node.get_min_y(), self.last_accessed_node.get_max_y()
@@ -280,15 +283,15 @@ class State:
 
         current_node = self.mylist.head
         while current_node is not None:
-            # 检查坐标是否在节点的活跃坐标集合中
+            # Check if coordinate is in node's active coordinate set
             if hasattr(current_node, 'get_active_coords_set') and (row, col) in current_node.get_active_coords_set():
                 return current_node
-            # 备用方法：如果节点没有活跃坐标集合，使用边界检查
+            # Fallback: if node doesn't have active coords set, use boundary check
             elif hasattr(current_node, 'get_min_x'):
                 min_x, max_x = current_node.get_min_x(), current_node.get_max_x()
                 min_y, max_y = current_node.get_min_y(), current_node.get_max_y()
                 if min_x <= row <= max_x and min_y <= col <= max_y:
-                    # 进一步检查坐标是否确实活跃
+                    # further verify that the coordinate is actually active
                     if self.result[row][col] > 0:
                         return current_node
             current_node = current_node.next
@@ -296,112 +299,105 @@ class State:
 
     def IS_Hinger(self, node=None, full_scan=False):
         """
-        判断真正桥梁并更新全局真桥坐标列表
-        所有检查操作完全在节点局部坐标中进行，仅在确认后转换为全局坐标
-        :param node: 可选，指定要检查的节点（用于增量更新）
-        :param full_scan: 是否进行全量扫描（首次调用时设置为True）
-        :return: 更新后的全局真桥坐标列表
+        Determine true hingers and update the global true hinger coordinate list.
+        All checks operate entirely in node local coordinates and convert to global only upon confirmation.
+        :param node: optional, specify a node to check (for incremental update)
+        :param full_scan: whether to perform a full scan (set to True on first call)
+        :return: updated global true hinger coordinates list
         """
         if full_scan:
-            # 首次调用：遍历所有节点(全量扫描)
+            # First call: iterate all nodes (full scan)
             self.true_hinger_global_coords = []
             current_node = self.mylist.head
             while current_node is not None:
                 self._process_node_true_hingers_local(current_node)
                 current_node = current_node.next
         elif node is not None:
-            # 增量更新：只处理指定节点，移除节点范围内的旧桥梁，添加新桥梁
+            # Incremental update: process only specified node, remove old hingers in the node range, add new ones
             self._remove_node_hingers_from_global(node)
-            # 然后处理该节点中的新的可能的桥梁
+            # then process new possible hingers in that node
             self._process_node_true_hingers_local(node)
 
-        # 更新桥梁数量
+        # Update hinger count
         self.hinger_count = len(self.true_hinger_global_coords)
         return self.true_hinger_global_coords
 
     def _process_node_true_hingers_local(self, node):
         """
-        在局部坐标空间中处理单个节点的真正桥梁判断
-        所有操作使用节点局部坐标，避免任何越界检查
-        在局部坐标空间中处理真桥检测，确认后再转换全局坐标
+        Process true hinger detection for a single node in local coordinate space.
+        All operations use node local coordinates and avoid any unnecessary global conversions.
         """
-        # 获取节点边界信息（用于最后的坐标转换）
+        # Get node boundary info (used for final coordinate conversion)
         min_x, max_x = node.get_min_x(), node.get_max_x()
         min_y, max_y = node.get_min_y(), node.get_max_y()
 
-        # 获取节点的网格数据（局部坐标）
+        # Get the node's grid data (local coordinates)
         node_grid = node.get_grid().data
         node_rows = len(node_grid)
         node_cols = len(node_grid[0]) if node_rows > 0 else 0
 
-        # 获取May_Hinger标记的潜在桥梁（局部坐标）
+        # Get May_Hinger marked potential hingers (local coordinates)
         array_data = node.get_array_data()
 
-        # 遍历节点中的潜在桥梁位置（使用局部坐标）
+        # Iterate potential hinger positions inside the node (local coordinates)
         for i_local in range(node_rows):
             for j_local in range(node_cols):
-                if array_data[i_local][j_local] == 1:  # 潜在桥梁位置
-                    # 在局部坐标空间中检查是否为真正桥梁
+                if array_data[i_local][j_local] == 1:  # potential hinger position
+                    # Check in local coordinate space whether it's a true hinger
                     if self._check_hinger_creates_new_region_local(node, i_local, j_local):
-                        # 如果是真正桥梁，将局部坐标转换为全局坐标
+                        # If it's a true hinger, convert local to global coordinates
                         i_global = min_y - 1 + i_local
                         j_global = min_x - 1 + j_local
 
-                        # 确保全局坐标有效
+                        # Ensure global coordinates are valid
                         if (0 <= i_global < self.m and 0 <= j_global < self.n):
-                            # 添加到全局真桥列表
+                            # Add to global true hinger list if not already present
                             if (i_global, j_global) not in self.true_hinger_global_coords:
                                 self.true_hinger_global_coords.append((i_global, j_global))
 
     def _check_hinger_creates_new_region_local(self, node, i_local, j_local):
         """
-        在局部坐标空间中检查移除指定桥梁是否会产生新的活跃区域
-        使用BFS算法，完全在节点局部网格内操作
+        In local coordinate space, check whether removing the specified potential hinger
+        would create a new active region. Uses BFS and operates entirely on the node local grid.
         """
-        # 获取节点的局部网格数据
+        # Get the node's local grid data
         node_grid = node.get_grid().data
         node_rows = len(node_grid)
         node_cols = len(node_grid[0]) if node_rows > 0 else 0
 
-        # 创建网格副本用于模拟操作
+        # Create a copy of the grid for simulation
         grid_copy = [row[:] for row in node_grid]
 
-        # 模拟移除该桥梁（在局部网格中临时设置为0）
+        # Simulate removing that hinger (temporarily set to 0 in local grid)
         original_value = grid_copy[i_local][j_local]
         grid_copy[i_local][j_local] = 0
 
-        # 使用BFS检查连通组件数量（在局部坐标中）
+        # Use BFS to check the number of connected components (in local coords)
         visited = set()
         region_count = 0
 
-        # 获取节点局部网格中的所有活跃单元格
+        # Collect all active cells in the node local grid
         active_cells = set()
         for i in range(node_rows):
             for j in range(node_cols):
                 if grid_copy[i][j] > 0:
                     active_cells.add((i, j))
 
-        """基本无意义
-        # 如果没有活跃单元格，不会产生新区域
-        if not active_cells:
-            return False
-        """
-
-        # BFS遍历
+        # BFS traversal
         for cell in active_cells:
             if cell not in visited:
                 region_count += 1
                 if region_count > 1:
-                    # 如果已经找到多于一个区域，提前终止
+                    # early exit if more than one region is found
                     break
 
-                # BFS遍历当前区域
+                # BFS traverse current region
                 queue = collections.deque([cell])
                 visited.add(cell)
 
                 while queue:
                     r, c = queue.popleft()
-                    # 检查八个方向（摩尔邻居）
+                    # check 8 directions (Moore neighborhood)
                     for dr in [-1, 0, 1]:
                         for dc in [-1, 0, 1]:
                             if dr == 0 and dc == 0:
@@ -409,30 +405,30 @@ class State:
                             nr, nc = r + dr, c + dc
                             neighbor = (nr, nc)
 
-                            # 确保邻居在节点网格范围内且是活跃单元格
+                            # ensure neighbor is within node grid and is active
                             if (0 <= nr < node_rows and 0 <= nc < node_cols and
                                     grid_copy[nr][nc] > 0 and neighbor not in visited):
                                 visited.add(neighbor)
                                 queue.append(neighbor)
 
-        # 如果区域数量大于1，表示会产生新区域
+        # If number of regions > 1, removal creates a new region
         return region_count > 1
 
     def _remove_node_hingers_from_global(self, node):
         """
-        从全局真桥列表中移除指定节点范围内的所有桥梁
-        基于节点边界信息进行过滤
+        Remove all hingers that lie within the specified node range from the global true hinger list.
+        Uses node boundary information for filtering.
         """
         min_x, max_x = node.get_min_x(), node.get_max_x()
         min_y, max_y = node.get_min_y(), node.get_max_y()
 
-        # 计算节点在全局网格中的实际范围
+        # Compute node's actual range in global grid
         global_min_row = min_y - 1
         global_max_row = max_y + 1
         global_min_col = min_x - 1
         global_max_col = max_x + 1
 
-        # 过滤掉在节点范围内的坐标
+        # Filter out coordinates that fall inside the node range
         self.true_hinger_global_coords = [
             coord for coord in self.true_hinger_global_coords
             if not (global_min_row <= coord[0] <= global_max_row and
@@ -441,18 +437,18 @@ class State:
 
     def numHingers(self):
         """
-        直接读取全局真桥坐标列表的长度来统计桥梁数量
-        更新self.hinger_count并返回当前桥梁数量
+        Count the number of hingers by reading the global true hinger list length.
+        Updates self.hinger_count and returns the current count.
         """
-        # 获取全局真桥坐标列表的长度
+        # Update hinger count from global list length
         self.hinger_count = len(self.true_hinger_global_coords)
 
-        # 返回桥梁数量
+        # Return number of hingers
         return self.hinger_count
 
     def numRegions(self):
         # Placeholder for returning number of regions
-        # 返回活跃区域数量的占位函数
+        # Returns the number of active regions
         return len(self.mylist)
 
 def tester():
@@ -525,7 +521,7 @@ def tester():
         col = int(gx // cell_size)
         row = int(gy // cell_size)
         if 0 <= row < m and 0 <= col < n:
-            # 新增：将鼠标像素坐标与网格坐标传递给 State
+            # New: pass mouse pixel coordinates and grid coordinates to State
             if state_holder['state'] is not None:
                 state_holder['state'].record_mouse(event.x, event.y, row=row, col=col)
 
@@ -545,6 +541,6 @@ def tester():
 
 if __name__ == "__main__":
     # Program entry point
-    # 程序入口
     tester()
+
 

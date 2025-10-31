@@ -15,9 +15,9 @@ from __future__ import annotations
 #in the GUI, show a star path, and import the path from a3 file
 # show the path on the GUI and give who need to active ahead
 """
-这个环节就是搭积木的环节
-把所有做好的模块全部放入其中
-并最终完成交付
+This part is the building-block assembly stage.
+Put all the completed modules into it.
+And finally complete the delivery.
 """
 
 #main game loop
@@ -31,9 +31,9 @@ import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
 import builtins
 
-# --- A1 / A3 依赖 ---
+# --- A1 / A3 Dependency ---
 from a1_state import State
-builtins.state = State  # 兼容某些代码里小写 state 的用法
+builtins.state = State  # Compatible with the usage of lowercase "state" in certain codes
 
 import a3_agent as a3
 a3.state = State
@@ -76,8 +76,8 @@ class GameApp:
         self._make_entry_overlays()
         self._draw_board()
 
-        # --- 信息面板（Hinger / Region）---
-        # 放在整个窗口 grid 的下方（canvas 占 row=0..30，这里放 row=31）
+        # --- Info Panel (Hinger / Region) ---
+        # Placed below the main window grid (canvas occupies row=0..30, put this at row=31)
         self.frame_info = tk.Frame(self.root)
         self.frame_info.grid(row=31, column=0, columnspan=2, sticky="w", pady=(8, 0))
 
@@ -172,7 +172,7 @@ class GameApp:
                                                 font=("Arial", max(10, CELL//2), "bold"), tags="grid")
         self.root.title(f"Hinger – Turn: {self.turn}")
 
-        # --- 更新 Hinger / Region 数 ---
+        # --- Update Hinger / Region counts ---
         try:
             self._refresh_hingers()
             hinger_count = len(getattr(self.state, "true_hinger_global_coords", [])) if self.state else 0
@@ -228,7 +228,7 @@ class GameApp:
         self.turn = self._opponent()
 
     def _count_regions(self) -> int:
-        """计算 >0 单元格的 8 邻域连通区域数"""
+        """Count number of 8-neighbour connected regions of cells with value > 0"""
         rows, cols = self.rows, self.cols
         seen = [[False]*cols for _ in range(rows)]
         dirs = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(1,1),( -1,1)]
@@ -406,7 +406,7 @@ class GameApp:
             self._ai_move_current()
             return
 
-        # Human vs Human：无 AI 可动
+        # Human vs Human: no AI to move.
         self.lbl_status.config(text="Next Turn: Human vs Human — no AI to move.")
         return
 
