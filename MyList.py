@@ -11,6 +11,9 @@ Includes a State class for Task 1
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Iterable, Iterator
 
+from dataclasses import dataclass
+from typing import List, Tuple, Optional, Iterable, Iterator
+
 __all__ = ["Grid2D", "ListNode", "MyList"]
 
 class Grid2D:
@@ -104,6 +107,11 @@ class ListNode:
         return self.graph_num
     def get_grid(self) -> Grid2D:
         return self.grid
+
+    def set_array_data(self, data: List[List[int]]) -> None:
+        """更新节点的 array_data（深拷贝避免副作用）"""
+        self.array_data = [row[:] for row in data]  # 深拷贝
+
     def get_array_data(self) -> List[List[int]]:
         # 返回 array_data 的深拷贝
         return [row[:] for row in self.array_data] if self.array_data else []
