@@ -262,7 +262,7 @@ class Agent:
         """
         if full_scan:
             # 全量扫描逻辑保持不变
-            current_node = state.getmylist().head
+            current_node = state.mylist.head
             while current_node is not None:
                 self._process_node_may_hinger(current_node)
                 current_node = current_node.next
@@ -411,23 +411,14 @@ class Agent:
 
         # 决策点5: 调用IS_Hinger → 更新全局真桥列表
         print("决策点5: 调用IS_Hinger判断真桥")
-        self.state.IS_Hinger(node=affected_node)
+        state.IS_Hinger(node=affected_node)
 
         # 更新桥梁数量
-        self.state.numHingers()
-        print(f"决策树处理完成，当前桥梁数量: {self.state.hinger_count}")
+        state.numHingers()
+        print(f"决策树处理完成，当前桥梁数量: {state.hinger_count}")
 
     def MCTS(self):
         pass
-# python
-from a1_state import State as state
-try:
-    # 若与 Agent 在同一文件，可直接 from 当前模块导入或直接使用 Agent
-    from a3_agent import Agent
-except Exception:
-    # 如果就在 a3_agent.py 里粘贴本段，确保上方已定义 Agent
-    pass
-
 # 覆盖多类搜索与启发情形的测试集
 TEST_CASES_MINI_ALPHA = [
     # 1) 十字真桥：中心为真桥（真桥应被优先选择）

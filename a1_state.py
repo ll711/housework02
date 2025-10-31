@@ -46,6 +46,12 @@ class State:
         :return: 桥梁数量
         """
         return self.true_hinger_global_coords
+    def get_result(self):
+        """
+        获取当前全局网格数据
+        :return: 全局网格数据
+        """
+        return self.result
     def getmylist(self):
         """
         获取当前链表对象
