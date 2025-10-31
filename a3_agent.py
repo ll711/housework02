@@ -250,62 +250,7 @@ class Agent:
             except Exception:
                 pass
 
-    def May_Hinger(self, node=None, full_scan=False, return_new_bridge=False):
-        """
-        优化后的May_Hinger方法：使用坐标列表比较替代数量比较。准确检测潜在桥梁的位置变化
-        修改后的May_Hinger方法，返回字符串"true"/"false"表示是否产生新可能桥梁
-        检查潜在桥梁状态，使用局部坐标遍历，仅在需要时转换为全局坐标
-        :param node: 可选，指定要检查的节点（用于增量更新）
-        :param full_scan: 是否进行全量扫描（首次调用时设置为True）
-        :param return_new_bridge: 是否返回新桥标志
-        :return: 如果return_new_bridge为True，返回"true"或"false"
-        """
-        if full_scan:
-            # 全量扫描逻辑保持不变
-            current_node = state.mylist.head
-            while current_node is not None:
-                self._process_node_may_hinger(current_node)
-                current_node = current_node.next
-            return None
 
-        elif node is not None:
-            # 保存旧的潜在桥梁坐标列表（使用局部坐标）
-            old_array_data = node.get_array_data()
-            old_bridge_coords = set()   # 使用集合而非列表提高性能
-
-            if old_array_data:
-                for i_local in range(len(old_array_data)):
-                    for j_local in range(len(old_array_data[0])):
-                        if old_array_data[i_local][j_local] == 1:
-                            old_bridge_coords.add((i_local, j_local))
-
-            # 处理节点，更新潜在桥梁标记
-            self._process_node_may_hinger(node)
-
-            # 获取新的潜在桥梁坐标列表
-            new_array_data = node.get_array_data()
-            new_bridge_coords = set()   # 使用集合而非列表提高性能
-
-            if new_array_data:
-                for i_local in range(len(new_array_data)):
-                    for j_local in range(len(new_array_data[0])):
-                        if new_array_data[i_local][j_local] == 1:
-                            new_bridge_coords.add((i_local, j_local))
-
-            # 使用集合操作检测新桥梁：检查新坐标集合中有但旧坐标集合中没有的坐标
-            new_bridges = new_bridge_coords - old_bridge_coords
-            has_new_bridge = len(new_bridges) > 0
-
-            """
-            # 可选：记录新桥梁的详细信息（用于调试）
-            if has_new_bridge and return_new_bridge:
-                print(f"检测到新潜在桥梁: {new_bridges}")
-            """
-
-            if return_new_bridge:
-                return "true" if has_new_bridge else "false"
-
-        return None
 
     def _process_node_may_hinger(self, node):
         """
