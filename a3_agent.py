@@ -12,6 +12,8 @@ Includes a State class for Task 1
 import collections
 
 from typing import List, Tuple, Optional
+
+import a1_state
 from MyList import MyList as mylist
 from a1_state import State as state
 
@@ -25,405 +27,229 @@ class Agent:
 
     def __str__(self):
         return self.name + self.size
-
-    def move(self, state: state, mode: str = "alphabeta") -> Optional[Coord]:
-        grid = getattr(state, "result", None)
-        if not grid:
+    def move(self, st: state, mode: str = "alphabeta") -> Optional[Coord]:
+        if not hasattr(st, "result") or not st.result:
             return None
-        fallback_moves = [(r, c)
-                          for r, row in enumerate(grid)
-                          for c, v in enumerate(row) if v > 0]
-        if not fallback_moves:
+        actives = [(r, c) for r, row in enumerate(st.result) for c, v in enumerate(row) if v > 0]
+        if not actives:
             return None
+        m = (mode or "alphabeta").lower()
+        if m in ("minimax", "mm", "mini"):
+            _, mv = self.MiniMax(st, depth=1, maximizing_player=True)
+        else:
+            _, mv = self.AlphaBeta(st, depth=2, alpha=float("-inf"), beta=float("inf"), maximizing_player=True)
+        return mv if mv is not None else actives[0]
 
-        m = (self.model or "alphabeta").lower()
-        try:
-            if m in ("alphabeta", "alpha-beta", "alpha", "ab"):
-                _, mv = self.AlphaBeta(
-                    state, depth=3, alpha=float("-inf"), beta=float("inf"), maximizing_player=True
-                )
-            elif m in ("minimax", "mini", "mm"):
-                _, mv = self.MiniMax(state, depth=3, maximizing_player=True)
-            else:
-                # 未知策略名时默认使用 alphabeta
-                _, mv = self.AlphaBeta(
-                    state, depth=3, alpha=float("-inf"), beta=float("inf"), maximizing_player=True
-                )
-            return mv if mv is not None else fallback_moves[0]
-        except Exception:
-            # 搜索异常时回退到首个合法坐标
-            return fallback_moves[0]
-
-    def evaluate(self, st: state) -> float:
-        """
-        按注释的优先级对局面打分：
-        - 真桥(尤其值为1)强奖励
-        - 惩罚 may_hinger 与风险桥位
-        - 角 > 边 > 内部
-        - 奖励连通块数、奇偶偏置；对总值轻惩罚
-        """
-        grid = getattr(st, "result", None)
-        if not grid or not grid[0]:
-            return 0.0
-
-        rows, cols = len(grid), len(grid[0])
-
-        # 若有真桥检测，做一次全量扫描，得到最新真桥集合
-        true_bridges_set = set()
-        if hasattr(st, "IS_Hinger"):
-            try:
-                coords = st.IS_Hinger(full_scan=True) or []
-                true_bridges_set = set(coords)
-            except Exception:
-                true_bridges_set = set()
-
-        # 局部工具
-        def deg8_local(g, r, c) -> int:
-            return self._deg8(g, r, c) if hasattr(self, "_deg8") else sum(
-                1
-                for dr in (-1, 0, 1)
-                for dc in (-1, 0, 1)
-                if not (dr == 0 and dc == 0)
-                and 0 <= r + dr < rows
-                and 0 <= c + dc < cols
-                and g[r + dr][c + dc] > 0
-            )
-
-        def count_regions8_local(g) -> int:
-            return self._count_regions8(g) if hasattr(self, "_count_regions8") else (
-                # 降级实现
-                (lambda: (
-                    (lambda vis=[]: 0)  # 仅占位，实际不会走到这里
-                ))()
-            )
-
-        # 统计特征
-        total_sum = 0
-        edge_cnt = 0
-        corner_cnt = 0
-        may_hingers = 0
-        risky_bridge_like = 0
-        true_bridge_ones = 0
-        true_bridge_others = 0
-
-        for r in range(rows):
-            for c in range(cols):
-                v = grid[r][c]
-                if v <= 0:
-                    continue
-
-                total_sum += v
-                is_edge = r == 0 or c == 0 or r == rows - 1 or c == cols - 1
-                is_corner = (r in (0, rows - 1)) and (c in (0, cols - 1))
-                if is_corner:
-                    corner_cnt += 1
-                elif is_edge:
-                    edge_cnt += 1
-
-                # 真桥奖励（值为1奖励更高）
-                if (r, c) in true_bridges_set:
-                    if v == 1:
-                        true_bridge_ones += 1
-                    else:
-                        true_bridge_others += 1
-
-                # may_hinger：直线两侧为0且八邻度较高的值为1位置
-                if v == 1:
-                    lr_zeros = (1 if c - 1 >= 0 and grid[r][c - 1] == 0 else 0) + \
-                               (1 if c + 1 < cols and grid[r][c + 1] == 0 else 0)
-                    ud_zeros = (1 if r - 1 >= 0 and grid[r - 1][c] == 0 else 0) + \
-                               (1 if r + 1 < rows and grid[r + 1][c] == 0 else 0)
-                    if (lr_zeros == 2 or ud_zeros == 2) and deg8_local(grid, r, c) >= 2:
-                        may_hingers += 1
-
-                    # 风险桥位倾向：一格视野内两侧都有活邻，未来可能成为唯一连接
-                    has_left = any(grid[r][cc] > 0 for cc in range(max(0, c - 1), c))
-                    has_right = any(grid[r][cc] > 0 for cc in range(c + 1, min(cols, c + 2)))
-                    has_up = any(grid[rr][c] > 0 for rr in range(max(0, r - 1), r))
-                    has_down = any(grid[rr][c] > 0 for rr in range(r + 1, min(rows, r + 2)))
-                    if (has_left and has_right) or (has_up and has_down):
-                        risky_bridge_like += 1
-
-        # 连通块与奇偶偏置
-        regions = self._count_regions8(grid)
-
-        def component_sizes() -> list[int]:
-            from collections import deque
-            visited = [[False] * cols for _ in range(rows)]
-            dirs8 = [(-1, 0), (1, 0), (0, -1), (0, 1),
-                     (-1, -1), (-1, 1), (1, -1), (1, 1)]
-            sizes: list[int] = []
+    # ===== May_Hinger：为各节点生成 array_data（可能桥）=====
+    def May_Hinger(self, st: state, node=None, full_scan: bool = False, return_new_bridge: bool = False):
+        # 确保图结构可用
+        self._ensure_graph(st)
+        def compute_for_node(nd) -> bool:
+            grid = nd.get_grid().data
+            rows = len(grid)
+            cols = len(grid[0]) if rows > 0 else 0
+            old = nd.get_array_data()
+            arr = [[0] * cols for _ in range(rows)]
+            changed_new_one = False
             for i in range(rows):
                 for j in range(cols):
-                    if grid[i][j] > 0 and not visited[i][j]:
-                        q = deque([(i, j)])
-                        visited[i][j] = True
-                        sz = 0
-                        while q:
-                            rr, cc = q.popleft()
-                            sz += 1
-                            for dr, dc in dirs8:
-                                nr, nc = rr + dr, cc + dc
-                                if 0 <= nr < rows and 0 <= nc < cols and not visited[nr][nc] and grid[nr][nc] > 0:
-                                    visited[nr][nc] = True
-                                    q.append((nr, nc))
-                        sizes.append(sz)
-            return sizes
+                    if grid[i][j] > 0:
+                        # 若移除此点会产生多个活跃区域 → 这是“可能桥”
+                        try:
+                            is_bridge_like = st._check_hinger_creates_new_region_local(nd, i, j)
+                        except Exception:
+                            is_bridge_like = False
+                        arr[i][j] = 1 if is_bridge_like else 0
+                        if return_new_bridge and arr[i][j] == 1:
+                            if not (0 <= i < len(old) and 0 <= j < (len(old[0]) if old else 0) and old[i][j] == 1):
+                                changed_new_one = True
+            nd.array_data = arr
+            return changed_new_one
 
-        parity_bias = sum(1 if sz % 2 == 1 else -1 for sz in component_sizes())
+        any_new = False
+        if full_scan:
+            cur = st.mylist.head if hasattr(st, "mylist") and st.mylist else None
+            while cur is not None:
+                if compute_for_node(cur):
+                    any_new = True
+                cur = cur.next
+        elif node is not None:
+            any_new = compute_for_node(node)
 
-        # 线性加权（按照注释的优先级进行）
+        if return_new_bridge:
+            return "true" if any_new else "false"
+        return None
+
+    # ===== 评估：多真桥、多>2、少可能桥、总和小 =====
+    def evaluate(self, st: state) -> float:
+        self._ensure_graph(st)
+        # 刷新可能桥与真桥
+        self.May_Hinger(st, full_scan=True)
+        try:
+            st.IS_Hinger(full_scan=True)
+            true_h = st.Get_hinger_global_coords() or []
+        except Exception:
+            true_h = []
+        poss = self._list_possible_bridge_globals_on(st)
+        actives = [(r, c) for r, row in enumerate(st.result) for c, v in enumerate(row) if v > 0]
+        num_gt2 = sum(1 for (r, c) in actives if st.result[r][c] > 2)
+        total_sum = sum(st.result[r][c] for (r, c) in actives)
         score = (
-                + 7.0 * true_bridge_ones
-                + 4.0 * true_bridge_others
-                + 1.5 * regions
-                + 0.6 * corner_cnt
-                + 0.4 * (edge_cnt)  # 非角边缘
-                + 0.3 * parity_bias
-                - 3.0 * may_hingers
-                - 1.2 * risky_bridge_like
-                - 0.04 * total_sum
+            6.0 * len(true_h) +
+            1.5 * num_gt2 -
+            1.0 * len(poss) -
+            0.01 * total_sum
         )
         return float(score)
 
-    def MiniMax(self, st: state, depth: int = 2, maximizing_player: bool = True) -> Tuple[float, Optional[Coord]]:
-        """
-        仅扩展两个代表分支：真桥分支 与 非真桥分支。
-        若真桥为空，用中性分支与风险分支补齐。
-        """
-        moves = self._legal_moves(st)
-        if depth == 0 or not moves:
+    # ===== MiniMax：按题述优先级直接取首选 =====
+    def MiniMax(self, st: state, depth: int = 1, maximizing_player: bool = True):
+        cands = self._ordered_candidates(st)
+        best = cands[0] if cands else None
+        return self.evaluate(st), best
+
+    # ===== Alpha-Beta：相同候选顺序展开与剪枝 =====
+    def AlphaBeta(self, st: state, depth: int = 2,
+                  alpha: float = float("-inf"), beta: float = float("inf"),
+                  maximizing_player: bool = True):
+        if depth <= 0:
+            return self.evaluate(st), None
+        cands = self._ordered_candidates(st)
+        if not cands:
             return self.evaluate(st), None
 
-        # 准备真桥集合用于分组
-        true_set = set()
-        if hasattr(st, "IS_Hinger"):
-            try:
-                true_set = set(st.IS_Hinger(full_scan=True) or [])
-            except Exception:
-                true_set = set()
-
-        # 分组
-        safe_moves: list[Coord] = []
-        neutral_moves: list[Coord] = []
-        risky_moves: list[Coord] = []
-
-        rows, cols = len(st.result), len(st.result[0]) if st.result else 0
-
-        def is_may_hinger(r: int, c: int) -> bool:
-            v = st.result[r][c]
-            if v != 1:
-                return False
-            lr_zeros = (1 if c - 1 >= 0 and st.result[r][c - 1] == 0 else 0) + \
-                       (1 if c + 1 < cols and st.result[r][c + 1] == 0 else 0)
-            ud_zeros = (1 if r - 1 >= 0 and st.result[r - 1][c] == 0 else 0) + \
-                       (1 if r + 1 < rows and st.result[r + 1][c] == 0 else 0)
-            return (lr_zeros == 2 or ud_zeros == 2) and self._deg8(st.result, r, c) >= 2
-
-        for mv in moves:
-            if mv in true_set:
-                safe_moves.append(mv)
-            elif is_may_hinger(*mv):
-                risky_moves.append(mv)
-            else:
-                neutral_moves.append(mv)
-
-        # 代表动作选择与排序（与 _legal_moves 的启发一致）
-        def key(mv: Coord):
-            r, c = mv
-            bridge_bias = 1 if st.result[r][c] == 1 and self._deg8(st.result, r, c) >= 2 else 0
-            edge_bias = 1 if r in (0, len(st.result) - 1) or c in (0, len(st.result[0]) - 1) else 0
-            return (bridge_bias, edge_bias, -st.result[r][c])
-
-        safe_moves.sort(key=key, reverse=True)
-        neutral_moves.sort(key=key, reverse=True)
-        risky_moves.sort(key=key, reverse=True)
-
-        # 仅取两类代表
-        cand: list[Coord] = []
-        if safe_moves:
-            cand.append(safe_moves[0])
-        if neutral_moves:
-            cand.append(neutral_moves[0])
-        if not cand and risky_moves:
-            cand.append(risky_moves[0])
-        if not cand:
-            cand.append(moves[0])
-
+        best_move = None
         if maximizing_player:
-            best_val = float("-inf")
-            best_move: Optional[Coord] = None
-            for mv in cand:
+            value = float("-inf")
+            for mv in cands:
                 child = self._clone_with_move(st, mv)
-                val, _ = self.MiniMax(child, depth - 1, maximizing_player=False)
-                if val > best_val:
-                    best_val, best_move = val, mv
-            return best_val, best_move
-        else:
-            best_val = float("inf")
-            best_move: Optional[Coord] = None
-            for mv in cand:
-                child = self._clone_with_move(st, mv)
-                val, _ = self.MiniMax(child, depth - 1, maximizing_player=True)
-                if val < best_val:
-                    best_val, best_move = val, mv
-            return best_val, best_move
-
-    def AlphaBeta(self,
-                  st: state,
-                  depth: int,
-                  alpha: float,
-                  beta: float,
-                  maximizing_player: bool = True) -> Tuple[float, Optional[Coord]]:
-        """
-        先真桥、后中性、最后风险排序；在较深层直接剪掉风险分支，只保留少量中性分支做束搜索。
-        再结合标准 alpha-beta 剪枝。
-        """
-        moves = self._legal_moves(st)
-        if depth == 0 or not moves:
-            return self.evaluate(st), None
-
-        # 分组准备
-        true_set = set()
-        if hasattr(st, "IS_Hinger"):
-            try:
-                true_set = set(st.IS_Hinger(full_scan=True) or [])
-            except Exception:
-                true_set = set()
-
-        rows, cols = len(st.result), len(st.result[0]) if st.result else 0
-
-        def is_may_hinger(r: int, c: int) -> bool:
-            v = st.result[r][c]
-            if v != 1:
-                return False
-            lr_zeros = (1 if c - 1 >= 0 and st.result[r][c - 1] == 0 else 0) + \
-                       (1 if c + 1 < cols and st.result[r][c + 1] == 0 else 0)
-            ud_zeros = (1 if r - 1 >= 0 and st.result[r - 1][c] == 0 else 0) + \
-                       (1 if r + 1 < rows and st.result[r + 1][c] == 0 else 0)
-            return (lr_zeros == 2 or ud_zeros == 2) and self._deg8(st.result, r, c) >= 2
-
-        safe_moves: list[Coord] = []
-        neutral_moves: list[Coord] = []
-        risky_moves: list[Coord] = []
-
-        for mv in moves:
-            if mv in true_set:
-                safe_moves.append(mv)
-            elif is_may_hinger(*mv):
-                risky_moves.append(mv)
-            else:
-                neutral_moves.append(mv)
-
-        def key(mv: Coord):
-            r, c = mv
-            bridge_bias = 1 if st.result[r][c] == 1 and self._deg8(st.result, r, c) >= 2 else 0
-            edge_bias = 1 if r in (0, len(st.result) - 1) or c in (0, len(st.result[0]) - 1) else 0
-            return (bridge_bias, edge_bias, -st.result[r][c])
-
-        safe_moves.sort(key=key, reverse=True)
-        neutral_moves.sort(key=key, reverse=True)
-        risky_moves.sort(key=key, reverse=True)
-
-        # 深度越深，越果断剪掉风险，并限制中性束宽
-        beam_neutral = 2 if depth >= 2 else 4
-        ordered: list[Coord] = []
-        ordered.extend(safe_moves)
-        ordered.extend(neutral_moves[:beam_neutral])
-        if depth <= 1:  # 只在浅层允许看一点风险分支
-            ordered.extend(risky_moves[:1])
-
-        if maximizing_player:
-            best_val = float("-inf")
-            best_move: Optional[Coord] = None
-            for mv in ordered:
-                child = self._clone_with_move(st, mv)
-                val, _ = self.AlphaBeta(child, depth - 1, alpha, beta, maximizing_player=False)
-                if val > best_val:
-                    best_val, best_move = val, mv
-                alpha = max(alpha, best_val)
-                if beta <= alpha:
+                score, _ = self.AlphaBeta(child, depth - 1, alpha, beta, False) if depth > 1 else (self.evaluate(child), None)
+                if score > value:
+                    value, best_move = score, mv
+                alpha = max(alpha, value)
+                if alpha >= beta:
                     break
-            return best_val, best_move
+            return value, best_move
         else:
-            best_val = float("inf")
-            best_move: Optional[Coord] = None
-            for mv in ordered:
+            value = float("inf")
+            for mv in cands:
                 child = self._clone_with_move(st, mv)
-                val, _ = self.AlphaBeta(child, depth - 1, alpha, beta, maximizing_player=True)
-                if val < best_val:
-                    best_val, best_move = val, mv
-                beta = min(beta, best_val)
-                if beta <= alpha:
+                score, _ = self.AlphaBeta(child, depth - 1, alpha, beta, True) if depth > 1 else (self.evaluate(child), None)
+                if score < value:
+                    value, best_move = score, mv
+                beta = min(beta, value)
+                if alpha >= beta:
                     break
-            return best_val, best_move
-    # ========= 辅助：生成落子、克隆走子、连通性与邻域 =========
+            return value, best_move
 
-    def _legal_moves(self, st: state) -> List[Coord]:
-        g = st.result
-        moves: List[Coord] = []
-        for r in range(len(g)):
-            for c in range(len(g[0]) if g else 0):
-                if g[r][c] > 0:
-                    moves.append((r, c))
+    # ===== 候选生成：严格按题述优先级 =====
+    def _ordered_candidates(self, st: state) -> List[Coord]:
+        self._ensure_graph(st)
+        # 更新可能桥与真桥
+        self.May_Hinger(st, full_scan=True)
+        try:
+            st.IS_Hinger(full_scan=True)
+            true_h = list(st.Get_hinger_global_coords() or [])
+        except Exception:
+            true_h = []
 
-        # 简单启发排序：优先考虑桥倾向、再考虑边界
-        def key(mv: Coord):
-            r, c = mv
-            bridge_bias = 1 if g[r][c] == 1 and self._deg8(g, r, c) >= 2 else 0
-            edge_bias = 1 if r in (0, len(g) - 1) or c in (0, len(g[0]) - 1) else 0
-            return (bridge_bias, edge_bias, -g[r][c])
+        grid = st.result
+        actives = [(r, c) for r, row in enumerate(grid) for c, v in enumerate(row) if v > 0]
+        gt2 = [(r, c) for (r, c) in actives if grid[r][c] > 2]
+        eq2 = [(r, c) for (r, c) in actives if grid[r][c] == 2]
+        eq1 = [(r, c) for (r, c) in actives if grid[r][c] == 1]
 
-        moves.sort(key=key, reverse=True)
-        return moves
+        # 第三层：值为2，且“不会产生任何可能桥”
+        eq2_no_poss = [(r, c) for (r, c) in eq2 if self._move_creates_no_possible_bridges(st, r, c)]
+        # 第四层：值为1，且“不会产生任何可能桥”
+        eq1_no_poss = [(r, c) for (r, c) in eq1 if self._move_creates_no_possible_bridges(st, r, c)]
+        # 第五层：值为2，且“产生的可能桥集中存在至少一个不是真桥”
+        eq2_has_non_true = [(r, c) for (r, c) in eq2 if self._move_creates_non_true_possible_bridge(st, r, c)]
+        # 第六层：值为1，且“产生的可能桥集中存在至少一个不是真桥”
+        eq1_has_non_true = [(r, c) for (r, c) in eq1 if self._move_creates_non_true_possible_bridge(st, r, c)]
 
+        ordered = []
+        # 1) 真桥优先
+        ordered += true_h
+        # 2) >2
+        ordered += gt2
+        # 3) 2且不产可能桥
+        ordered += eq2_no_poss
+        # 4) 1且不产可能桥
+        ordered += eq1_no_poss
+        # 5) 2且存在非真“可能桥”
+        ordered += eq2_has_non_true
+        # 6) 1且存在非真“可能桥”
+        ordered += eq1_has_non_true
+        # 7) 其他活跃格兜底
+        ordered += actives
+
+        # 去重保序
+        seen, res = set(), []
+        for mv in ordered:
+            if mv not in seen:
+                seen.add(mv)
+                res.append(mv)
+        return res
+
+    # ===== 工具：模拟一步后“不会产生任何可能桥” =====
+    def _move_creates_no_possible_bridges(self, st: state, r: int, c: int) -> bool:
+        child = self._clone_with_move(st, (r, c))
+        self.May_Hinger(child, full_scan=True)
+        poss = self._list_possible_bridge_globals_on(child)
+        return len(poss) == 0
+
+    # ===== 工具：模拟一步后“产生的可能桥集中是否存在不是真桥” =====
+    def _move_creates_non_true_possible_bridge(self, st: state, r: int, c: int) -> bool:
+        child = self._clone_with_move(st, (r, c))
+        self.May_Hinger(child, full_scan=True)
+        poss = set(self._list_possible_bridge_globals_on(child))
+        try:
+            child.IS_Hinger(full_scan=True)
+            true_h = set(child.Get_hinger_global_coords() or [])
+        except Exception:
+            true_h = set()
+        # 若存在“可能桥”不在“真桥”集合内 → 返回 True
+        return any(p not in true_h for p in poss)
+
+    # ===== 工具：克隆局面并在 (r,c) 处减一 =====
     def _clone_with_move(self, st: state, mv: Coord) -> state:
         r, c = mv
-        new_grid = [row[:] for row in st.result]
-        if new_grid[r][c] > 0:
-            new_grid[r][c] -= 1
-        child = state(new_grid)
-        child.Get_Graph()
+        grid = [row[:] for row in st.result]
+        if 0 <= r < len(grid) and 0 <= c < (len(grid[0]) if grid else 0) and grid[r][c] > 0:
+            grid[r][c] -= 1
+        child = state(grid)
+        self._ensure_graph(child)
         return child
 
-    def _count_regions8(self, grid: List[List[int]]) -> int:
-        if not grid or not grid[0]:
-            return 0
-        rows, cols = len(grid), len(grid[0])
-        vis = [[False] * cols for _ in range(rows)]
-        dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    # ===== 工具：收集全局“可能桥”坐标（从节点 array_data 投影）=====
+    def _list_possible_bridge_globals_on(self, st: state) -> List[Coord]:
+        coords: List[Coord] = []
+        cur = st.mylist.head if hasattr(st, "mylist") and st.mylist else None
+        while cur is not None:
+            arr = cur.get_array_data() or []
+            rows = len(arr)
+            cols = len(arr[0]) if rows > 0 else 0
+            min_x, min_y = cur.get_min_x(), cur.get_min_y()
+            for i in range(rows):
+                for j in range(cols):
+                    if arr[i][j] == 1:
+                        gi = (min_y - 1) + i
+                        gj = (min_x - 1) + j
+                        # 仅收集仍为活跃格的坐标
+                        if 0 <= gi < st.m and 0 <= gj < st.n and st.result[gi][gj] > 0:
+                            coords.append((gi, gj))
+            cur = cur.next
+        return coords
 
-        def bfs(sr: int, sc: int):
-            from collections import deque
-            q = deque([(sr, sc)])
-            vis[sr][sc] = True
-            while q:
-                r, c = q.popleft()
-                for dr, dc in dirs:
-                    nr, nc = r + dr, c + dc
-                    if 0 <= nr < rows and 0 <= nc < cols and not vis[nr][nc] and grid[nr][nc] > 0:
-                        vis[nr][nc] = True
-                        q.append((nr, nc))
+    # ===== 工具：确保链表图已构建 =====
+    def _ensure_graph(self, st: state) -> None:
+        if hasattr(st, "Get_Graph"):
+            try:
+                st.Get_Graph()
+            except Exception:
+                pass
 
-        cnt = 0
-        for r in range(rows):
-            for c in range(cols):
-                if grid[r][c] > 0 and not vis[r][c]:
-                    cnt += 1
-                    bfs(r, c)
-        return cnt
-
-    def _deg8(self, grid: List[List[int]], r: int, c: int) -> int:
-        rows, cols = len(grid), len(grid[0]) if grid else 0
-        deg = 0
-        for dr in (-1, 0, 1):
-            for dc in (-1, 0, 1):
-                if dr == 0 and dc == 0:
-                    continue
-                nr, nc = r + dr, c + dc
-                if 0 <= nr < rows and 0 <= nc < cols and grid[nr][nc] > 0:
-                    deg += 1
-        return deg
     def May_Hinger(self, node=None, full_scan=False, return_new_bridge=False):
         """
         优化后的May_Hinger方法：使用坐标列表比较替代数量比较。准确检测潜在桥梁的位置变化
@@ -593,185 +419,180 @@ class Agent:
 
     def MCTS(self):
         pass
-def teser():
-    """
-    在几组小网格上测试 MiniMax 与 AlphaBeta 的返回分数与推荐落子。
-    注意：需要先完成 Agent.evaluate/MiniMax/AlphaBeta 内的占位符实现。
-    """
-    def show_grid(g):
-        for r in g:
-            print(" ".join(f"{v:2d}" for v in r))
-        print()
+# python
+from a1_state import State as state
+try:
+    # 若与 Agent 在同一文件，可直接 from 当前模块导入或直接使用 Agent
+    from a3_agent import Agent
+except Exception:
+    # 如果就在 a3_agent.py 里粘贴本段，确保上方已定义 Agent
+    pass
 
-    cases = [
-        # 案例1：一条带转折的连通带
-        (
-            [
-                [1, 1, 0, 0],
-                [0, 1, 1, 0],
-                [0, 0, 1, 0],
-                [0, 0, 1, 1],
-            ],
-            2, 3
-        ),
-        # 案例2：两块区域+部分2值，便于产生/消除桥
-        (
-            [
-                [2, 1, 0, 0, 1],
-                [0, 1, 1, 0, 1],
-                [0, 0, 2, 0, 1],
-                [0, 0, 1, 1, 1],
-                [0, 0, 0, 0, 1],
-            ],
-            2, 3
-        ),
-        # 案例3：更稀疏，利于观察边界优先与奇偶影响
-        (
-            [
-                [1, 0, 1, 0],
-                [0, 2, 0, 1],
-                [1, 0, 1, 0],
-                [0, 1, 0, 1],
-            ],
-            2, 3
-        ),
-    ]
-    more_cases = [
-        # 案例4：十字交叉（中心格往往是桥）
-        (
-            [
-                [0, 1, 0],
-                [1, 1, 1],
-                [0, 1, 0],
-            ],
-            2, 3
-        ),
-        # 案例5：水平走廊（1x6）
-        (
-            [
-                [1, 1, 1, 1, 1, 1],
-            ],
-            2, 3
-        ),
-        # 案例6：垂直走廊（6x1）
-        (
-            [
-                [1],
-                [1],
-                [1],
-                [1],
-                [1],
-                [1],
-            ],
-            2, 3
-        ),
-        # 案例7：环形包围，中间留孔（桥较少，边界显著）
-        (
-            [
-                [1, 1, 1, 1, 1],
-                [1, 0, 0, 0, 1],
-                [1, 0, 1, 0, 1],
-                [1, 0, 0, 0, 1],
-                [1, 1, 1, 1, 1],
-            ],
-            3, 4
-        ),
-        # 案例8：棋盘格（8 邻域下连通性强）
-        (
-            [
-                [1, 0, 1, 0, 1],
-                [0, 1, 0, 1, 0],
-                [1, 0, 1, 0, 1],
-                [0, 1, 0, 1, 0],
-                [1, 0, 1, 0, 1],
-            ],
-            2, 3
-        ),
-        # 案例9：两个相距较远的区域（分离岛）
-        (
-            [
-                [1, 1, 0, 0, 0, 1, 1],
-                [1, 1, 0, 0, 0, 1, 1],
-            ],
-            2, 3
-        ),
-        # 案例10：含较多的 2，测试减子对桥/安全路径的影响
-        (
-            [
-                [2, 0, 2, 0, 2],
-                [0, 2, 0, 2, 0],
-                [2, 0, 2, 0, 2],
-            ],
-            2, 3
-        ),
-        # 案例11：显式构造 may_hinger（中心左右为 0，斜对角有支撑）
-        (
-            [
-                [0, 0, 1, 0, 0],
-                [0, 1, 0, 1, 0],
-                [1, 0, 1, 0, 1],
-                [0, 1, 0, 1, 0],
-                [0, 0, 1, 0, 0],
-            ],
-            2, 3
-        ),
-        # 案例12：T 字分叉（分支选择与桥评估）
-        (
-            [
-                [0, 1, 0, 0],
-                [1, 1, 1, 0],
-                [0, 1, 0, 0],
-                [0, 1, 0, 1],
-            ],
-            2, 3
-        ),
-    ]
+# 覆盖多类搜索与启发情形的测试集
+TEST_CASES_MINI_ALPHA = [
+    # 1) 十字真桥：中心为真桥（真桥应被优先选择）
+    ("十字真桥", [
+        [0, 1, 0],
+        [1, 1, 1],
+        [0, 1, 0],
+    ], 2, 3),
 
-    cases += more_cases
-    from a1_state import State as state
-    ag = Agent()
+    # 2) 真桥 + 存在 >2：依然先点真桥而非 >2
+    ("真桥优先于>2", [
+        [0, 1, 0],
+        [1, 3, 1],
+        [0, 1, 0],
+    ], 2, 3),
 
-    for idx, (grid, d_mm, d_ab) in enumerate(cases, 1):
-        print(f"=== Case {idx} ===")
-        print("初始网格：")
-        show_grid(grid)
+    # 3) 纯 >2 优先：无真桥时应优先点击 3
+    ("仅>2优先", [
+        [0, 1, 0],
+        [1, 3, 1],
+        [0, 1, 0],
+        [0, 1, 0],
+    ], 2, 3),
 
+    # 4) 水平走廊（1x6）：任意中段通常为真桥
+    ("水平走廊", [
+        [1, 1, 1, 1, 1, 1],
+    ], 2, 3),
+
+    # 5) 垂直走廊（6x1）：任意中段通常为真桥
+    ("垂直走廊", [
+        [1],
+        [1],
+        [1],
+        [1],
+        [1],
+        [1],
+    ], 2, 3),
+
+    # 6) 2 的“减一不产生可能桥”：致密块中点
+    ("2减一不产可能桥(致密块)", [
+        [2, 2, 2],
+        [2, 2, 2],
+        [2, 2, 2],
+    ], 2, 3),
+
+    # 7) 1 的“减一不产生可能桥”：边角安全点
+    ("1减一不产可能桥(边角)", [
+        [1, 1, 0],
+        [1, 1, 0],
+        [0, 0, 0],
+    ], 2, 3),
+
+    # 8) 2 的“产生可能桥但非真桥”：有替代连通路径
+    ("2产可能桥但非真桥", [
+        [1, 1, 1],
+        [1, 2, 1],
+        [1, 1, 1],
+    ], 2, 3),
+
+    # 9) 1 的“产生可能桥但非真桥”：近似环绕
+    ("1产可能桥但非真桥", [
+        [0, 1, 0],
+        [1, 1, 1],
+        [0, 1, 0],
+        [0, 1, 0],
+    ], 2, 3),
+
+    # 10) 环形包围：移除单点通常不致断开（少真桥、少可能桥）
+    ("环形(中空)", [
+        [1, 1, 1, 1, 1],
+        [1, 0, 0, 0, 1],
+        [1, 0, 1, 0, 1],
+        [1, 0, 0, 0, 1],
+        [1, 1, 1, 1, 1],
+    ], 3, 4),
+
+    # 11) 棋盘格：8 邻域下连通性强，少真桥
+    ("棋盘格", [
+        [1, 0, 1, 0, 1],
+        [0, 1, 0, 1, 0],
+        [1, 0, 1, 0, 1],
+        [0, 1, 0, 1, 0],
+        [1, 0, 1, 0, 1],
+    ], 2, 3),
+
+    # 12) 两个相距较远的分岛
+    ("分离岛", [
+        [1, 1, 0, 0, 0, 1, 1],
+        [1, 1, 0, 0, 0, 1, 1],
+    ], 2, 3),
+
+    # 13) 多个 2 的十字：考察“2不产可能桥→1不产可能桥→产可能桥非真→其他”
+    ("多2十字", [
+        [0, 2, 0],
+        [2, 2, 2],
+        [0, 2, 0],
+    ], 2, 3),
+
+    # 14) T 字分叉：路口点多为真桥
+    ("T字分叉", [
+        [0, 1, 0, 0],
+        [1, 2, 1, 0],
+        [0, 1, 0, 0],
+        [0, 1, 0, 1],
+    ], 2, 3),
+
+    # 15) L 形走廊：拐角附近常出现真桥
+    ("L形走廊", [
+        [1, 1, 1, 0],
+        [1, 0, 1, 0],
+        [1, 0, 1, 1],
+    ], 2, 3),
+
+    # 16) 混合 >2 与稀疏 1：便于观察“>2 优先”与启发评分
+    ("混合>2稀疏1", [
+        [2, 0, 3, 0, 1],
+        [0, 1, 0, 2, 0],
+        [1, 0, 2, 0, 1],
+    ], 2, 3),
+]
+
+def run_minimax_alphabeta_tests(cases=TEST_CASES_MINI_ALPHA):
+    try:
+        ag = Agent()
+    except Exception:
+        # 若当前作用域已有 Agent 定义则直接实例化
+        ag = globals().get("Agent")()
+
+    for idx, (name, grid, d_mm, d_ab) in enumerate(cases, 1):
+        print(f"=== Case {idx}: {name} ===")
         st = state(grid)
         st.Get_Graph()
 
-        # MiniMax
+        # 运行 MiniMax
+        mm_score, mm_move = None, None
         try:
             mm_score, mm_move = ag.MiniMax(st, depth=d_mm, maximizing_player=True)
-            print(f"MiniMax(depth={d_mm}) -> score={mm_score:.3f}, move={mm_move}")
+            print(f"MiniMax(depth={d_mm}) -> score={mm_score}, move={mm_move}")
         except Exception as e:
-            print(f"MiniMax 执行异常: {e}")
-            mm_move = None
+            print(f"MiniMax 异常: {e}")
 
-        # Alpha-Beta
+        # 运行 Alpha-Beta
+        ab_score, ab_move = None, None
         try:
             ab_score, ab_move = ag.AlphaBeta(st, depth=d_ab, alpha=float('-inf'), beta=float('inf'), maximizing_player=True)
-            print(f"AlphaBeta(depth={d_ab}) -> score={ab_score:.3f}, move={ab_move}")
+            print(f"AlphaBeta(depth={d_ab}) -> score={ab_score}, move={ab_move}")
         except Exception as e:
-            print(f"AlphaBeta 执行异常: {e}")
-            ab_move = None
+            print(f"AlphaBeta 异常: {e}")
 
-        # 应用各自推荐一步并打印效果
+        # 应用各自推荐一步查看落子效果
         def apply_and_show(move, tag):
             if move is None:
                 return
             try:
                 child = ag._clone_with_move(st, move)
-                print(f"{tag} 应用推荐落子 {move} 后网格：")
-                show_grid(child.result)
+                print(f"{tag} 推荐 {move} 后网格：")
+                for r in child.result:
+                    print(" ".join(f"{v:2d}" for v in r))
             except Exception as e:
                 print(f"{tag} 应用落子异常: {e}")
 
         apply_and_show(mm_move, "MiniMax")
         apply_and_show(ab_move, "AlphaBeta")
-
-    print("测试完成。")
-
+        print()
 
 if __name__ == "__main__":
-    # 直接运行本文件时执行测试
-    teser()
+    run_minimax_alphabeta_tests()

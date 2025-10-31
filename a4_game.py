@@ -19,24 +19,29 @@ from __future__ import annotations
 把所有做好的模块全部放入其中
 并最终完成交付
 """
+
+#main game loop
+# load a1, a2, a3 files and give a GUI graphical interface to choose which moode to
+# run(matichine VS machine, human VS machine)
+#in the GUI, show a star path, and import the path from a3 file
+# show the path on the GUI and give who need to active ahead
+
 from typing import List, Tuple, Optional
 import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
-import builtins  # for injecting symbol `state` during a3_agent import
+import builtins
 
-# --- Import A1 / A3 ---
+# --- A1 / A3 依赖 ---
 from a1_state import State
-builtins.state = State
+builtins.state = State  # 兼容某些代码里小写 state 的用法
 
 import a3_agent as a3
-a3.state = State        # ensure Agent._clone_with_move can call state(...)
+a3.state = State
 from a3_agent import Agent
 
 Coord = Tuple[int, int]
-
 CELL = 36
 PAD  = 14
-
 AI_CHOICES = ["AlphaBeta", "MiniMax"]
 
 
@@ -71,6 +76,18 @@ class GameApp:
         self._make_entry_overlays()
         self._draw_board()
 
+        # --- 信息面板（Hinger / Region）---
+        # 放在整个窗口 grid 的下方（canvas 占 row=0..30，这里放 row=31）
+        self.frame_info = tk.Frame(self.root)
+        self.frame_info.grid(row=31, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
+        self.lbl_hinger = tk.Label(self.frame_info, text="Hinger Count: 0",
+                                   font=("Arial", 11, "bold"), fg="red")
+        self.lbl_region = tk.Label(self.frame_info, text="Region Count: 0",
+                                   font=("Arial", 11, "bold"), fg="blue")
+        self.lbl_hinger.grid(row=0, column=0, padx=(8, 12))
+        self.lbl_region.grid(row=0, column=1)
+
     # ---------- UI ----------
     def _build_ui(self):
         width  = self.cols * CELL + 2*PAD
@@ -104,7 +121,8 @@ class GameApp:
         self.btn_reset = tk.Button(panel, text="Reset / Re-enter", command=self.on_reset)
         self.btn_reset.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(12, 2))
 
-        self.lbl_status = ttk.Label(panel, text="Fill numbers then Confirm", foreground="#444", wraplength=180, justify="left")
+        self.lbl_status = ttk.Label(panel, text="Fill numbers then Confirm",
+                                    foreground="#444", wraplength=180, justify="left")
         self.lbl_status.grid(row=6, column=0, columnspan=2, sticky="w", pady=(10, 0))
 
     def _make_entry_overlays(self):
@@ -154,6 +172,18 @@ class GameApp:
                                                 font=("Arial", max(10, CELL//2), "bold"), tags="grid")
         self.root.title(f"Hinger – Turn: {self.turn}")
 
+        # --- 更新 Hinger / Region 数 ---
+        try:
+            self._refresh_hingers()
+            hinger_count = len(getattr(self.state, "true_hinger_global_coords", [])) if self.state else 0
+        except Exception:
+            hinger_count = 0
+        region_count = self._count_regions()
+        if hasattr(self, "lbl_hinger"):
+            self.lbl_hinger.config(text=f"Hinger Count: {hinger_count}")
+        if hasattr(self, "lbl_region"):
+            self.lbl_region.config(text=f"Region Count: {region_count}")
+
     # ---------- Helpers ----------
     def _refresh_hingers(self):
         if self.state is None:
@@ -196,6 +226,31 @@ class GameApp:
 
     def _swap_turn(self):
         self.turn = self._opponent()
+
+    def _count_regions(self) -> int:
+        """计算 >0 单元格的 8 邻域连通区域数"""
+        rows, cols = self.rows, self.cols
+        seen = [[False]*cols for _ in range(rows)]
+        dirs = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(1,1),( -1,1)]
+        from collections import deque
+
+        def bfs(sr, sc):
+            q = deque([(sr, sc)])
+            seen[sr][sc] = True
+            while q:
+                r, c = q.popleft()
+                for dr, dc in dirs:
+                    nr, nc = r+dr, c+dc
+                    if 0 <= nr < rows and 0 <= nc < cols and not seen[nr][nc] and self.grid[nr][nc] > 0:
+                        seen[nr][nc] = True
+                        q.append((nr, nc))
+        count = 0
+        for r in range(rows):
+            for c in range(cols):
+                if self.grid[r][c] > 0 and not seen[r][c]:
+                    bfs(r, c)
+                    count += 1
+        return count
 
     # ---------- Events ----------
     def on_confirm_board(self):
@@ -337,7 +392,6 @@ class GameApp:
         mode = self.mode_var.get()
         # Case 2: Human vs AI but it's human's turn -> step to AI and move
         if mode == "Human vs AI":
-            # set turn to AI and move
             self.turn = "AI-B"
             self.lbl_status.config(text="Stepped to AI-B turn via Next Turn")
             self._draw_board()
@@ -352,7 +406,7 @@ class GameApp:
             self._ai_move_current()
             return
 
-        # Otherwise (Human vs Human): Next Turn does nothing explicit.
+        # Human vs Human：无 AI 可动
         self.lbl_status.config(text="Next Turn: Human vs Human — no AI to move.")
         return
 

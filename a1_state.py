@@ -12,6 +12,8 @@ Includes a State class for Task 1
 """
 import tkinter as tk
 import collections
+from typing import Any
+
 from MyList import MyList
 
 # 保持对 MyList 的依赖
@@ -38,7 +40,12 @@ class State:
         self.affected_node = set()  # 受影响的节点集合
         # 新增：用于记录鼠标事件（像素与网格坐标）
         self.mouse_events = []  # [{'x': int, 'y': int, 'row': int|None, 'col': int|None}, ...]
-
+    def Get_hinger_global_coords(self):
+        """
+        获取当前桥梁数量
+        :return: 桥梁数量
+        """
+        return self.true_hinger_global_coords
     def record_mouse(self, x: int, y: int, row: int | None = None, col: int | None = None) -> None:
         """
         记录一次鼠标事件
