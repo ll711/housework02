@@ -87,7 +87,7 @@ def _cell_risk(state: State, r: int, c: int) -> int:
 def _path_risk(state: State, path: list[Coord]) -> int:
     """
     Total risk of a path = sum of _cell_risk for each cell on the path.
-    (If你想不计起点，把 range 换成 path[1:].)
+    (If you want to disregard the starting point, replace "range" with "path[1:]")
     """
     if not path:
         return 0
